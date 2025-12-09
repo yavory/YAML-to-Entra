@@ -1,6 +1,6 @@
 import logging
 import requests
-from azure.identity import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential, ClientCertificateCredential
 from .config import SAMLServiceProvider
 
 logger = logging.getLogger(__name__)
@@ -8,8 +8,18 @@ logger = logging.getLogger(__name__)
 GRAPH_API_BASE = "https://graph.microsoft.com/v1.0"
 
 class EntraClient:
-    def __init__(self):
-        self.credential = DefaultAzureCredential()
+    def __init__(self, client_id=None, tenant_id=None, certificate_path=None):
+        if client_id and tenant_id and certificate_path:
+            with open(certificate_path, "rb") as cert_file:
+                logger.info(f"Using ClientCertificateCredential with client_id={client_id}, tenant_id={tenant_id}")
+                self.credential = ClientCertificateCredential(
+                    tenant_id=tenant_id,
+                    client_id=client_id,
+                    certificate_path=certificate_path
+                )
+        else:
+            logger.info("Using DefaultAzureCredential")
+            self.credential = DefaultAzureCredential()
         self.token = None
 
     def _get_headers(self):

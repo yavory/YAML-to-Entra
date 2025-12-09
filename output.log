@@ -1,0 +1,19 @@
+E
+======================================================================
+ERROR: test_auth (unittest.loader._FailedTest.test_auth)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_auth
+Traceback (most recent call last):
+  File "/usr/lib64/python3.14/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+  File "/home/T-800/Projects/yamlEntra/entra_provisioner/tests/test_auth.py", line 3, in <module>
+    from entra_provisioner.entra import EntraClient
+  File "/home/T-800/Projects/yamlEntra/entra_provisioner/entra.py", line 3, in <module>
+    from azure.identity import DefaultAzureCredential, ClientCertificateCredential
+ModuleNotFoundError: No module named 'azure'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)

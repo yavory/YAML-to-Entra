@@ -15,6 +15,9 @@ def main():
     parser = argparse.ArgumentParser(description="Provision Entra ID SAML Applications from YAML")
     parser.add_argument("config_file", help="Path to the YAML configuration file")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--client-id", help="Client ID for certificate auth")
+    parser.add_argument("--tenant-id", help="Tenant ID for certificate auth")
+    parser.add_argument("--cert-path", help="Path to certificate file for auth")
     
     args = parser.parse_args()
     
@@ -28,7 +31,11 @@ def main():
         logger.error(f"Failed to load configuration: {e}")
         sys.exit(1)
         
-    client = EntraClient()
+    client = EntraClient(
+        client_id=args.client_id, 
+        tenant_id=args.tenant_id, 
+        certificate_path=args.cert_path
+    )
     
     # load_config returns List[SAMLServiceProvider]
     for app_config in config:
