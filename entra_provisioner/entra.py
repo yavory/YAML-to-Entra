@@ -1,7 +1,7 @@
 import logging
 import requests
 from azure.identity import DefaultAzureCredential
-from .config import EntraAppConfig
+from .config import SAMLServiceProvider
 
 logger = logging.getLogger(__name__)
 
@@ -14,29 +14,51 @@ class EntraClient:
 
     def _get_headers(self):
         if not self.token:
-            # Scope for MS Graph
             self.token = self.credential.get_token("https://graph.microsoft.com/.default").token
         return {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json"
         }
 
-    def provision_app(self, config: EntraAppConfig):
+    def provision_app(self, config: SAMLServiceProvider):
         headers = self._get_headers()
+        spec = config.spec
         
         # 1. Create Application
+        # We use replyUrlsWithType for better SAML support if possible, but web.redirectUris is standard.
+        # Mapping:
+        # entityId -> identifierUris
+        # assertionConsumerServiceUrl -> redirectUris
+        
         app_payload = {
-            "displayName": config.name,
+            "displayName": config.metadata.name,
             "signInAudience": "AzureADMyOrg",
             "web": {
-                "redirectUris": config.reply_urls,
-                "homePageUrl": config.sign_on_url,
-                "logoutUrl": config.logout_url
+                "redirectUris": [spec.assertionConsumerServiceUrl],
+                "homePageUrl": spec.singleLogoutServiceUrl, # Mapping SLO to homepage as a placeholder or exact SLO field if beta
+                "logoutUrl": spec.singleLogoutServiceUrl
             },
-            "identifierUris": config.identifier_uris
+            "identifierUris": [spec.entityId]
         }
         
-        logger.info(f"Creating application: {config.name}")
+        # Add Optional Claims if present
+        if spec.claims:
+            # This is a simplified mapping. Real claim mapping policies are complex.
+            # We will add them to optionalClaims idToken/accessToken/saml2Token
+            claims_map = []
+            for claim in spec.claims:
+                claims_map.append({
+                    "name": claim.name,
+                    "source": claim.source, # null or "user"
+                    "essential": False,
+                    "additionalProperties": []
+                })
+            
+            app_payload["optionalClaims"] = {
+                "saml2Token": claims_map
+            }
+
+        logger.info(f"Creating application: {config.metadata.name}")
         resp = requests.post(f"{GRAPH_API_BASE}/applications", json=app_payload, headers=headers)
         if resp.status_code != 201:
             raise Exception(f"Failed to create application: {resp.text}")
@@ -46,54 +68,53 @@ class EntraClient:
         client_id = app_data['appId']
         logger.info(f"Created App Registration. Object ID: {app_id}, App ID: {client_id}")
 
-        # 2. Create Service Principal (Enterprise App)
+        # 2. Create Service Principal
         sp_payload = {
             "appId": client_id
         }
-        logger.info(f"Creating Service Principal for {config.name}")
+        logger.info(f"Creating Service Principal for {config.metadata.name}")
         resp = requests.post(f"{GRAPH_API_BASE}/servicePrincipals", json=sp_payload, headers=headers)
         if resp.status_code != 201:
-             # It might already exist if we are retrying, but for a new app it shouldn't.
             raise Exception(f"Failed to create Service Principal: {resp.text}")
         
         sp_data = resp.json()
         sp_id = sp_data['id']
         logger.info(f"Created Service Principal. Object ID: {sp_id}")
 
-        # 3. Configure SAML (preferredSingleSignOnMode)
-        # Note: 'saml' mode is set on the Service Principal
-        # We also might need to add a claim mapping or similar, but basic SAML app just needs this.
+        # 3. Configure SAML mode
         patch_sp_payload = {
-            "preferredSingleSignOnMode": "saml"
-            # tag as 'WindowsAzureActiveDirectoryGalleryApplicationNonPrimaryV1' is sometimes needed for legacy behavior 
-            # but usually just setting mode is enough for non-gallery apps.
-            # Actually, to make it a "Non-Gallery" SAML app, we usually need to add specific tags.
-            # "tags": ["WindowsAzureActiveDirectoryCustomSingleSignOnApplication"]
+            "preferredSingleSignOnMode": "saml",
+            "tags": ["WindowsAzureActiveDirectoryCustomSingleSignOnApplication"]
         }
-        # Add the tag to ensure it shows up correctly as a custom SAML app
-        patch_sp_payload["tags"] = ["WindowsAzureActiveDirectoryCustomSingleSignOnApplication"]
 
-        logger.info(f"Configuring SAML mode for {config.name}")
+        logger.info(f"Configuring SAML mode for {config.metadata.name}")
         resp = requests.patch(f"{GRAPH_API_BASE}/servicePrincipals/{sp_id}", json=patch_sp_payload, headers=headers)
         if resp.status_code != 204:
              logger.warning(f"Failed to set SAML mode: {resp.text}")
 
-        # 4. Assign Owners if specified
-        if config.owners:
-            for owner_id in config.owners:
-                self._add_owner(app_id, owner_id, headers, "applications")
-                self._add_owner(sp_id, owner_id, headers, "servicePrincipals")
+        # 4. Group Assignments
+        # To assign a group, we create an AppRoleAssignment on the group or the SP.
+        # POST /servicePrincipals/{resourceSpId}/appRoleAssignedTo 
+        # { "principalId": "{groupId}", "resourceId": "{resourceSpId}", "appRoleId": "00...00" (default) }
+        
+        if spec.groupAssignments:
+            for group_assign in spec.groupAssignments:
+                self._assign_group(sp_id, group_assign.groupId, headers)
 
         return {"appId": client_id, "objectId": app_id, "servicePrincipalId": sp_id}
 
-    def _add_owner(self, resource_id, owner_id, headers, resource_type):
-        # owner_id must be a GUID (User Object ID).
-        # Payload looks like: { "@odata.id": "https://graph.microsoft.com/v1.0/directoryObjects/{id}" }
+    def _assign_group(self, sp_id, group_id, headers):
+        # Default Access Role (User) is usually all zeros.
+        # If the app defines roles, we would need to look them up.
+        # For now, we assume default access.
+        default_role_id = "00000000-0000-0000-0000-000000000000"
+        
         payload = {
-            "@odata.id": f"{GRAPH_API_BASE}/directoryObjects/{owner_id}"
+            "principalId": group_id,
+            "resourceId": sp_id,
+            "appRoleId": default_role_id
         }
-        logger.info(f"Adding owner {owner_id} to {resource_type}/{resource_id}")
-        resp = requests.post(f"{GRAPH_API_BASE}/{resource_type}/{resource_id}/owners/$ref", json=payload, headers=headers)
-        if resp.status_code != 204 and resp.status_code != 201:
-            logger.warning(f"Failed to add owner {owner_id}: {resp.text}")
-
+        logger.info(f"Assigning group {group_id} to Service Principal {sp_id}")
+        resp = requests.post(f"{GRAPH_API_BASE}/servicePrincipals/{sp_id}/appRoleAssignedTo", json=payload, headers=headers)
+        if resp.status_code != 201:
+             logger.warning(f"Failed to assign group {group_id}: {resp.text}")

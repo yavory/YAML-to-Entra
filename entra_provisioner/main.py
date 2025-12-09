@@ -30,13 +30,14 @@ def main():
         
     client = EntraClient()
     
-    for app_config in config.applications:
+    # load_config returns List[SAMLServiceProvider]
+    for app_config in config:
         try:
-            logger.info(f"Provisioning application: {app_config.name}")
+            logger.info(f"Provisioning application: {app_config.metadata.name}")
             result = client.provision_app(app_config)
-            logger.info(f"Successfully provisioned {app_config.name}: {result}")
+            logger.info(f"Successfully provisioned {app_config.metadata.name}: {result}")
         except Exception as e:
-            logger.error(f"Error provisioning {app_config.name}: {e}")
+            logger.error(f"Error provisioning {app_config.metadata.name}: {e}")
             # Continue with next app or exit? Let's continue.
 
 if __name__ == "__main__":

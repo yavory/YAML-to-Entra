@@ -1,10 +1,15 @@
-applications:
-  - name: "Test SAML App"
-    identifier_uris:
-      - "api://test-saml-app"
-    reply_urls:
-      - "https://test-app.com/acs"
-    sign_on_url: "https://test-app.com/login"
-    logout_url: "https://test-app.com/logout"
-    owners:
-      - "00000000-0000-0000-0000-000000000000"
+apiVersion: v1
+kind: SAMLServiceProvider
+metadata:
+  name: "New Test App"
+  environment: "dev"
+  description: "Test description"
+spec:
+  entityId: "api://new-test-app"
+  assertionConsumerServiceUrl: "https://new-test.com/acs"
+  singleLogoutServiceUrl: "https://new-test.com/logout"
+  claims:
+    - name: "email"
+      source: "user"
+  groupAssignments:
+    - groupId: "group-guid"

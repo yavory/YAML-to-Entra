@@ -2,21 +2,51 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 import yaml
 
-class EntraAppConfig(BaseModel):
-    name: str = Field(..., description="Display name of the application")
-    identifier_uris: List[str] = Field(default_factory=list, description="List of Identifier URIs (Entity IDs)")
-    reply_urls: List[str] = Field(default_factory=list, description="List of Reply URLs (ACS URLs)")
-    logo_url: Optional[str] = Field(None, description="URL of the application logo")
-    owners: List[str] = Field(default_factory=list, description="List of owner Object IDs or UPNs")
-    
-    # SAML specific optional settings
-    sign_on_url: Optional[str] = None
-    logout_url: Optional[str] = None
+class Metadata(BaseModel):
+    name: str
+    environment: str
+    description: Optional[str] = None
 
-class Config(BaseModel):
-    applications: List[EntraAppConfig]
+class Certificate(BaseModel):
+    type: str
+    value: Optional[str] = None
 
-def load_config(file_path: str) -> Config:
+class Claim(BaseModel):
+    name: str
+    source: str
+
+class GroupAssignment(BaseModel):
+    groupId: str
+    role: Optional[str] = None
+
+class Spec(BaseModel):
+    entityId: str
+    assertionConsumerServiceUrl: str
+    singleLogoutServiceUrl: Optional[str] = None
+    nameIdFormat: Optional[str] = None
+    signatureAlgorithm: Optional[str] = None
+    certificate: Optional[Certificate] = None
+    claims: List[Claim] = Field(default_factory=list)
+    groupAssignments: List[GroupAssignment] = Field(default_factory=list)
+
+class SAMLServiceProvider(BaseModel):
+    apiVersion: str
+    kind: str
+    metadata: Metadata
+    spec: Spec
+
+def load_config(file_path: str) -> List[SAMLServiceProvider]:
+    """
+    Parses one or more YAML documents from the file.
+    Returns a list of SAMLServiceProvider objects.
+    """
     with open(file_path, 'r') as f:
-        data = yaml.safe_load(f)
-    return Config(**data)
+        # load_all returns a generator
+        data_gen = yaml.safe_load_all(f)
+        configs = []
+        for data in data_gen:
+            if data is None: 
+                continue
+            if data.get('kind') == 'SAMLServiceProvider':
+                configs.append(SAMLServiceProvider(**data))
+    return configs
