@@ -34,64 +34,95 @@ class EntraClient:
         headers = self._get_headers()
         spec = config.spec
         
-        # 1. Create Application
-        # We use replyUrlsWithType for better SAML support if possible, but web.redirectUris is standard.
-        # Mapping:
-        # entityId -> identifierUris
-        # assertionConsumerServiceUrl -> redirectUris
+        # 1. Check for existing Application
+        logger.info(f"Checking for existing application with entityId: {spec.entityId}")
+        # Graph API filter needs single quotes
+        query_url = f"{GRAPH_API_BASE}/applications?$filter=identifierUris/any(x:x eq '{spec.entityId}')"
+        resp = requests.get(query_url, headers=headers)
+        if resp.status_code != 200:
+             raise Exception(f"Failed to query applications: {resp.text}")
         
-        app_payload = {
-            "displayName": config.metadata.name,
-            "signInAudience": "AzureADMyOrg",
-            "web": {
-                "redirectUris": [spec.assertionConsumerServiceUrl],
-                "homePageUrl": spec.singleLogoutServiceUrl, # Mapping SLO to homepage as a placeholder or exact SLO field if beta
-                "logoutUrl": spec.singleLogoutServiceUrl
-            },
-            "identifierUris": [spec.entityId]
-        }
+        existing_apps = resp.json().get('value', [])
         
-        # Add Optional Claims if present
-        if spec.claims:
-            # This is a simplified mapping. Real claim mapping policies are complex.
-            # We will add them to optionalClaims idToken/accessToken/saml2Token
-            claims_map = []
-            for claim in spec.claims:
-                claims_map.append({
-                    "name": claim.name,
-                    "source": claim.source, # null or "user"
-                    "essential": False,
-                    "additionalProperties": []
-                })
+        if existing_apps:
+            logger.info(f"Application already exists: {existing_apps[0]['displayName']}")
+            app_id = existing_apps[0]['id']
+            client_id = existing_apps[0]['appId']
+            # We could optionally PATCH the app here to ensure config matches, 
+            # but for now we just skip creation.
+        else:
+            # Create Application
+            # We use replyUrlsWithType for better SAML support if possible, but web.redirectUris is standard.
+            # Mapping:
+            # entityId -> identifierUris
+            # assertionConsumerServiceUrl -> redirectUris
             
-            app_payload["optionalClaims"] = {
-                "saml2Token": claims_map
+            app_payload = {
+                "displayName": config.metadata.name,
+                "signInAudience": "AzureADMyOrg",
+                "web": {
+                    "redirectUris": [spec.assertionConsumerServiceUrl],
+                    "homePageUrl": spec.singleLogoutServiceUrl, # Mapping SLO to homepage as a placeholder or exact SLO field if beta
+                    "logoutUrl": spec.singleLogoutServiceUrl
+                },
+                "identifierUris": [spec.entityId]
             }
+            
+            # Add Optional Claims if present
+            if spec.claims:
+                # This is a simplified mapping. Real claim mapping policies are complex.
+                # We will add them to optionalClaims idToken/accessToken/saml2Token
+                claims_map = []
+                for claim in spec.claims:
+                    claims_map.append({
+                        "name": claim.name,
+                        "source": claim.source, # null or "user"
+                        "essential": False,
+                        "additionalProperties": []
+                    })
+                
+                app_payload["optionalClaims"] = {
+                    "saml2Token": claims_map
+                }
+    
+            logger.info(f"Creating application: {config.metadata.name}")
+            resp = requests.post(f"{GRAPH_API_BASE}/applications", json=app_payload, headers=headers)
+            if resp.status_code != 201:
+                raise Exception(f"Failed to create application: {resp.text}")
+            
+            app_data = resp.json()
+            app_id = app_data['id']
+            client_id = app_data['appId']
+            logger.info(f"Created App Registration. Object ID: {app_id}, App ID: {client_id}")
 
-        logger.info(f"Creating application: {config.metadata.name}")
-        resp = requests.post(f"{GRAPH_API_BASE}/applications", json=app_payload, headers=headers)
-        if resp.status_code != 201:
-            raise Exception(f"Failed to create application: {resp.text}")
+        # 2. Check for or Create Service Principal
+        # Check if SP exists for this appId
+        logger.info(f"Checking for Service Principal for appId: {client_id}")
+        sp_query_url = f"{GRAPH_API_BASE}/servicePrincipals?$filter=appId eq '{client_id}'"
+        resp = requests.get(sp_query_url, headers=headers)
+        if resp.status_code != 200:
+             raise Exception(f"Failed to query Service Principals: {resp.text}")
+             
+        existing_sps = resp.json().get('value', [])
         
-        app_data = resp.json()
-        app_id = app_data['id']
-        client_id = app_data['appId']
-        logger.info(f"Created App Registration. Object ID: {app_id}, App ID: {client_id}")
-
-        # 2. Create Service Principal
-        sp_payload = {
-            "appId": client_id
-        }
-        logger.info(f"Creating Service Principal for {config.metadata.name}")
-        resp = requests.post(f"{GRAPH_API_BASE}/servicePrincipals", json=sp_payload, headers=headers)
-        if resp.status_code != 201:
-            raise Exception(f"Failed to create Service Principal: {resp.text}")
-        
-        sp_data = resp.json()
-        sp_id = sp_data['id']
-        logger.info(f"Created Service Principal. Object ID: {sp_id}")
+        if existing_sps:
+            logger.info(f"Service Principal already exists for {config.metadata.name}")
+            sp_id = existing_sps[0]['id']
+        else:
+            sp_payload = {
+                "appId": client_id
+            }
+            logger.info(f"Creating Service Principal for {config.metadata.name}")
+            resp = requests.post(f"{GRAPH_API_BASE}/servicePrincipals", json=sp_payload, headers=headers)
+            if resp.status_code != 201:
+                raise Exception(f"Failed to create Service Principal: {resp.text}")
+            
+            sp_data = resp.json()
+            sp_id = sp_data['id']
+            logger.info(f"Created Service Principal. Object ID: {sp_id}")
 
         # 3. Configure SAML mode
+        # It's generally safe to patch this even if it exists
         patch_sp_payload = {
             "preferredSingleSignOnMode": "saml",
             "tags": ["WindowsAzureActiveDirectoryCustomSingleSignOnApplication"]
