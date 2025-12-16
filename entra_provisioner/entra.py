@@ -95,15 +95,7 @@ class EntraClient:
             client_id = app_data['appId']
             logger.info(f"Created App Registration. Object ID: {app_id}, App ID: {client_id}")
 
-            # Update identifierUris separately using the generated client_id
-            identifier_uri = f"api://{client_id}"
-            logger.info(f"Updating identifierUris for application to: {identifier_uri}")
-            patch_app_payload = {
-                "identifierUris": [identifier_uri]
-            }
-            resp = requests.patch(f"{GRAPH_API_BASE}/applications/{app_id}", json=patch_app_payload, headers=headers)
-            if resp.status_code != 204:
-                raise Exception(f"Failed to update identifierUris: {resp.text}")
+
 
 
 
