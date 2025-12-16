@@ -64,8 +64,7 @@ class EntraClient:
                     "redirectUris": [spec.assertionConsumerServiceUrl],
                     "homePageUrl": spec.singleLogoutServiceUrl, # Mapping SLO to homepage as a placeholder or exact SLO field if beta
                     "logoutUrl": spec.singleLogoutServiceUrl
-                },
-                "identifierUris": [spec.entityId]
+                }
             }
             
             # Add Optional Claims if present
@@ -94,6 +93,15 @@ class EntraClient:
             app_id = app_data['id']
             client_id = app_data['appId']
             logger.info(f"Created App Registration. Object ID: {app_id}, App ID: {client_id}")
+
+            # Update identifierUris separately
+            logger.info(f"Updating identifierUris for application: {client_id}")
+            patch_app_payload = {
+                "identifierUris": [spec.entityId]
+            }
+            resp = requests.patch(f"{GRAPH_API_BASE}/applications/{app_id}", json=patch_app_payload, headers=headers)
+            if resp.status_code != 204:
+                raise Exception(f"Failed to update identifierUris: {resp.text}")
 
         # 2. Check for or Create Service Principal
         # Check if SP exists for this appId
