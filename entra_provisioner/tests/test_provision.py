@@ -45,7 +45,10 @@ class TestEntraProvisioner(unittest.TestCase):
         mock_app_resp = MagicMock()
         mock_app_resp.status_code = 201
         mock_app_resp.json.return_value = {"id": "app-obj-id", "appId": "client-id"}
-
+        
+        # 3. Patch App (identifierUris)
+        mock_patch_app_resp = MagicMock()
+        mock_patch_app_resp.status_code = 204
 
         # 4. Create SP
         mock_sp_resp = MagicMock()
@@ -70,8 +73,8 @@ class TestEntraProvisioner(unittest.TestCase):
         
         
         # Configure side_effect for PATCH calls
-        # Sequence: PATCH /servicePrincipals/{id} (SAML mode)
-        mock_requests.patch.side_effect = [mock_patch_sp_resp]
+        # Sequence: PATCH /applications/{id} (identifierUris), PATCH /servicePrincipals/{id} (SAML mode)
+        mock_requests.patch.side_effect = [mock_patch_app_resp, mock_patch_sp_resp]
 
         client = EntraClient()
         config = SAMLServiceProvider(
@@ -105,7 +108,12 @@ class TestEntraProvisioner(unittest.TestCase):
         sp_call = mock_requests.post.call_args_list[1]
         self.assertEqual(sp_call[1]['json']['appId'], "client-id")
 
-
+        # Check identifierUris PATCH
+        # First PATCH should be for app identifierUris
+        patch_app_call = mock_requests.patch.call_args_list[0]
+        self.assertIn("applications/app-obj-id", patch_app_call[0][0])
+        # Verify it uses api://{client_id}
+        self.assertEqual(patch_app_call[1]['json']['identifierUris'], ["api://client-id"])
 
     @patch('entra_provisioner.entra.DefaultAzureCredential')
     @patch('entra_provisioner.entra.requests')
