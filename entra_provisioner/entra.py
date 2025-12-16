@@ -35,9 +35,10 @@ class EntraClient:
         spec = config.spec
         
         # 1. Check for existing Application
-        logger.info(f"Checking for existing application with entityId: {spec.entityId}")
+        location = "displayName"
+        logger.info(f"Checking for existing application with {location}: {config.metadata.name}")
         # Graph API filter needs single quotes
-        query_url = f"{GRAPH_API_BASE}/applications?$filter=identifierUris/any(x:x eq '{spec.entityId}')"
+        query_url = f"{GRAPH_API_BASE}/applications?$filter=displayName eq '{config.metadata.name}'"
         resp = requests.get(query_url, headers=headers)
         if resp.status_code != 200:
              raise Exception(f"Failed to query applications: {resp.text}")
@@ -94,14 +95,7 @@ class EntraClient:
             client_id = app_data['appId']
             logger.info(f"Created App Registration. Object ID: {app_id}, App ID: {client_id}")
 
-            # Update identifierUris separately
-            logger.info(f"Updating identifierUris for application: {client_id}")
-            patch_app_payload = {
-                "identifierUris": [spec.entityId]
-            }
-            resp = requests.patch(f"{GRAPH_API_BASE}/applications/{app_id}", json=patch_app_payload, headers=headers)
-            if resp.status_code != 204:
-                raise Exception(f"Failed to update identifierUris: {resp.text}")
+
 
         # 2. Check for or Create Service Principal
         # Check if SP exists for this appId
